@@ -45,3 +45,7 @@
 ## 实现来源
 
 A-Bogus 与 SM3 实现来自同一账户维护的 Apache-2.0 项目 pygojrc/Douyin_TikTok_Download_API，并为本项目调整为独立模块。见 LICENSE 及 vendored 模块头部说明。
+
+## One-off live smoke check
+
+The GitHub Actions workflow contains a single anonymous request to the sample work. To run it on a future change, use a push commit message containing [live-smoke]. It is deliberately opt-in so routine unit tests do not depend on Douyin availability.
