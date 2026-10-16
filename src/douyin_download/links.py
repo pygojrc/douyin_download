@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urljoin, urlsplit
 
 import httpx
 
-URL_RE = re.compile(r"https?://[^\s<>\\"']+", re.IGNORECASE)
+URL_RE = re.compile(r"https?://[^\s<>]+", re.IGNORECASE)
 ID_RE = re.compile(r"(?<!\d)(\d{8,25})(?!\d)")
 PATH_PATTERNS = (
     re.compile(r"/(?:video|note|photo)/(\d+)(?:/|$)", re.IGNORECASE),
@@ -40,12 +40,15 @@ def _extract_candidate(value: str) -> str:
     match = URL_RE.search(text)
     if match:
         text = match.group(0)
-    text = text.strip().rstrip(".,，。;；)]}>\\\"'\\")
+    text = text.strip().rstrip(".,，。;；)]}>").strip().strip('"').strip("'")
     if not text:
         raise LinkError("没有找到可解析的链接或作品 ID")
     if ID_RE.fullmatch(text):
         return text
-    if "://" not in text and re.match(r"(?i)(?:www\.)?(?:v\.)?(?:douyin\.com|iesdouyin\.com|amemv\.com)(?:/|$)", text):
+    if "://" not in text and re.match(
+        r"(?i)(?:www\.)?(?:v\.)?(?:douyin\.com|iesdouyin\.com|amemv\.com)(?:/|$)",
+        text,
+    ):
         text = "https://" + text
     return text
 
@@ -63,7 +66,9 @@ def _check_url(url: str) -> tuple[str, str]:
         raise LinkError("URL 不允许包含 userinfo")
     if port not in {None, 80, 443}:
         raise LinkError("不支持非标准端口")
-    if not host or not any(host == domain or host.endswith("." + domain) for domain in ALLOWED_DOMAINS):
+    if not host or not any(
+        host == domain or host.endswith("." + domain) for domain in ALLOWED_DOMAINS
+    ):
         raise LinkError("这不是受支持的抖音链接域名")
     return host, parts.path or "/"
 
@@ -110,9 +115,13 @@ def parse_link(value: str) -> LinkInfo:
 def expand_short_link(url: str, *, max_hops: int = 8, timeout: float = 12.0) -> str:
     """Follow one redirect at a time and validate every redirect destination."""
     current = url
-    with httpx.Client(timeout=timeout, follow_redirects=False, headers={
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-    }) as client:
+    with httpx.Client(
+        timeout=timeout,
+        follow_redirects=False,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36",
+        },
+    ) as client:
         for _ in range(max_hops):
             _check_url(current)
             response = client.get(current)
@@ -120,7 +129,9 @@ def expand_short_link(url: str, *, max_hops: int = 8, timeout: float = 12.0) -> 
                 info = parse_link(current)
                 if info.aweme_id:
                     return current
-                raise LinkError(f"短链接没有跳转到可识别的作品链接（HTTP {response.status_code}）")
+                raise LinkError(
+                    f"短链接没有跳转到可识别的作品链接（HTTP {response.status_code}）"
+                )
             location = response.headers.get("location")
             if not location:
                 raise LinkError("重定向响应缺少 Location")
