@@ -5,42 +5,63 @@
 1. 从抖音搜索页、作品页或分享文本中解析作品 ID。
 2. 调用抖音网页作品详情接口，输出作品详情 JSON。
 
-不需要 SQL、Redis、Web 服务、任务队列或浏览器。数据只在内存中处理，默认不写文件。
+不需要 SQL、Redis、Web 服务或任务队列。默认情况下，详情命令会使用一次性 Chromium 访客会话取得 UIFID Cookie，并缓存到项目根目录的 douyin_cookie 文件，后续重复使用；不会访问用户日常浏览器的配置文件或登录会话。
 
 ## 安装
 
-需要 Python 3.11 或更高版本。
+需要 Python 3.11 或更高版本，以及本机已安装 Chromium 或 Chrome。使用 uv：
+
+    uv sync --extra dev
+
+也可以安装为 Python 包：
 
     pip install .
 
+如果系统没有自动检测到浏览器，可通过 DOUYIN_CHROMIUM_PATH 指定可执行文件路径，例如：
+
+    export DOUYIN_CHROMIUM_PATH=/usr/bin/chromium
+
 ## 使用
 
-解析你提供的搜索链接：
+解析链接是离线操作：
 
-    douyin-download parse "https://www.douyin.com/root/search/美少女视频?aid=7e734c83-1c2f-4e12-91de-d71cabe7f0b3&modal_id=7349403611006389555&type=general"
+    uv run douyin-download parse "https://www.douyin.com/video/7349403611006389555"
 
 查询作品详情：
 
-    douyin-download detail "https://www.douyin.com/root/search/美少女视频?aid=7e734c83-1c2f-4e12-91de-d71cabe7f0b3&modal_id=7349403611006389555&type=general"
+    uv run douyin-download detail 7349403611006389555
 
-也可以直接传作品 ID：
+第一次运行时，如果项目根目录还没有有效的 douyin_cookie，程序会启动无头 Chromium，使用临时 profile 和 Chromium 自动分配的随机 CDP 端口访问抖音首页，读取访客 Cookie 后立即关闭浏览器。Cookie 会以当前用户可读写的权限写入项目根目录的 douyin_cookie 文件。后续请求自动读取这个文件，不会每次都启动浏览器。
 
-    douyin-download detail 7349403611006389555
+当详情接口明确返回 UIFID Not Found 时，程序会重新获取 Cookie、覆盖缓存文件并重试一次。如果新的 Cookie 仍被拒绝，会报告错误并停止，不会无限循环启动浏览器。
 
-详情成功时，标准输出为详情 JSON（优先输出响应中的 aweme_detail 字段）。解析命令是离线的；详情命令需要访问抖音。
+## Cookie 优先级与管理
 
-## Cookie 与风控
+- 默认方式：自动读取或生成项目根目录的 douyin_cookie 文件。
+- 手动文件：使用 --cookie-file 指定 Cookie 请求头文件。
+- 环境变量：设置 DOUYIN_COOKIE 后使用该值，优先于自动缓存。
+- 禁用浏览器：使用 --no-auto-browser，只使用显式的 --cookie-file 或 DOUYIN_COOKIE；适合匿名烟测或不希望启动浏览器的环境。
 
-部分网络环境或请求会受到抖音风控限制。若访客请求返回 403 或签名相关错误，可以把自己浏览器中抖音站点的 Cookie 放入环境变量，不要提交到 Git：
+例如：
 
-    export DOUYIN_COOKIE='cookie_name=value; another_cookie=value'
-    douyin-download detail 7349403611006389555
+    uv run douyin-download detail 7349403611006389555 --cookie-file ./my_cookie.txt
 
-也可用 --cookie-file 指向只包含 Cookie 请求头内容的文本文件。程序只在本次运行中读取它，不会把 Cookie 或结果存入数据库。不要把含有登录态的 Cookie 分享给他人。
+    DOUYIN_COOKIE='UIFID_TEMP=...' uv run douyin-download detail 7349403611006389555
+
+    uv run douyin-download detail 7349403611006389555 --no-auto-browser
+
+douyin_cookie 包含可复用的访客 Cookie，已加入 .gitignore。请勿上传、分享或提交此文件。程序使用原子替换写入文件，并限制文件权限为仅当前用户可读写（POSIX 文件权限 0600）。要强制获取新 Cookie，可删除该文件后再次执行详情命令。
+
+## 限制
+
+- 本机必须安装 Chromium/Chrome，且能够访问抖音首页。临时 profile 仅用于生成访客身份，不会读取你日常浏览器的登录会话。
+- 如果抖音没有签发 UIFID Cookie，或网络/风控继续拒绝请求，自动刷新也无法保证详情请求成功。
+- 自动刷新仅由明确的 UIFID Not Found 错误触发；其他风控、签名或作品可见性错误不会导致反复启动浏览器。
+- 项目不使用 SQL、Redis 或后台服务，作品详情仅通过标准输出返回。
 
 ## 验证状态
 
-本项目包含离线解析测试。运行详情请求需要当前网络可以连接 www.douyin.com；若返回风控或接口结构变化，CLI 会显示请求错误，而不会将“解析出了 ID”误报为“成功获取详情”。
+本项目包含离线解析、签名和 Cookie 缓存测试。详情请求仍依赖当前网络和抖音接口行为；离线测试通过不代表上游一定允许实时详情请求。
 
 ## 实现来源
 
@@ -48,8 +69,5 @@ A-Bogus 与 SM3 实现来自同一账户维护的 Apache-2.0 项目 pygojrc/Douy
 
 ## One-off live smoke check
 
-The GitHub Actions workflow contains a single anonymous request to the sample work. To run it on a future change, use a push commit message containing [live-smoke]. It is deliberately opt-in so routine unit tests do not depend on Douyin availability.
+The GitHub Actions workflow contains a single anonymous request to the sample work. To run it on a future change, use a push commit message containing [live-smoke]. The smoke test passes --no-auto-browser intentionally, so it tests the direct anonymous endpoint without requiring a Chromium install.
 
-## Live test result
-
-On 2026-10-16 UTC, the sample URL and request code were exercised on a GitHub-hosted runner. Link parsing succeeded and the detail request reached Douyin, but an anonymous request returned HTTP 403 with `Blocked by ArgusSecurityPlugin Uifid Not Found`. This is a failed live detail fetch, not a success. Provide a valid browser Cookie containing the visitor UIFID to attempt the signed request again.
