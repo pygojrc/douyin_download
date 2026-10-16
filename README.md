@@ -49,3 +49,7 @@ A-Bogus 与 SM3 实现来自同一账户维护的 Apache-2.0 项目 pygojrc/Douy
 ## One-off live smoke check
 
 The GitHub Actions workflow contains a single anonymous request to the sample work. To run it on a future change, use a push commit message containing [live-smoke]. It is deliberately opt-in so routine unit tests do not depend on Douyin availability.
+
+## Live test result
+
+On 2026-10-16 UTC, the sample URL and request code were exercised on a GitHub-hosted runner. Link parsing succeeded and the detail request reached Douyin, but an anonymous request returned HTTP 403 with `Blocked by ArgusSecurityPlugin Uifid Not Found`. This is a failed live detail fetch, not a success. Provide a valid browser Cookie containing the visitor UIFID to attempt the signed request again.
