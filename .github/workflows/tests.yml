@@ -37,7 +37,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          douyin-download detail 'https://www.douyin.com/root/search/%E7%BE%8E%E5%B0%91%E5%A5%B3%E8%A7%86%E9%A2%91?aid=7e734c83-1c2f-4e12-91de-d71cabe7f0b3&modal_id=7349403611006389555&type=general' > detail.json 2> detail-error.log
+          douyin-download detail 'https://www.douyin.com/root/search/%E7%BE%8E%E5%B0%91%E5%A5%B3%E8%A7%86%E9%A2%91?aid=7e734c83-1c2f-4e12-91de-d71cabe7f0b3&modal_id=7349403611006389555&type=general' --no-auto-browser > detail.json 2> detail-error.log
           result=$?
           if [ "$result" -eq 0 ]; then
             python - <<'PY'
