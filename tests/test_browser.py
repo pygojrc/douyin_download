@@ -62,3 +62,27 @@ def test_cookie_header_from_cdp_cookies() -> None:
         ]
     )
     assert header == "UIFID_TEMP=visitor; s_v_web_id=verify"
+
+
+
+def test_headed_mode_is_preferred_when_a_display_exists(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.delenv("DOUYIN_CHROMIUM_HEADLESS", raising=False)
+
+    assert browser_module._use_headless_mode() is False
+
+
+def test_headless_mode_can_be_forced(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.setenv("DOUYIN_CHROMIUM_HEADLESS", "1")
+
+    assert browser_module._use_headless_mode() is True
+
+
+def test_headless_mode_is_selected_without_a_display(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.delenv("DOUYIN_CHROMIUM_HEADLESS", raising=False)
+
+    assert browser_module._use_headless_mode() is True
