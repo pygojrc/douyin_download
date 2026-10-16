@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import tempfile
 import time
@@ -91,24 +92,28 @@ def _find_chromium() -> str:
     )
 
 
-def _wait_for_debug_port(profile: Path, process: subprocess.Popen[Any], timeout: float) -> int:
-    active_port_file = profile / "DevToolsActivePort"
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            raise BrowserCookieError(
-                "Chromium 启动后立即退出。请检查浏览器安装、运行权限和系统依赖。"
-            )
-        try:
-            lines = active_port_file.read_text(encoding="utf-8").splitlines()
-            if lines:
-                port = int(lines[0].strip())
-                if 0 < port < 65536:
-                    return port
-        except (OSError, ValueError):
-            pass
-        time.sleep(0.1)
-    raise BrowserCookieError("等待 Chromium 启动 CDP 端口超时。")
+def _reserve_debug_port() -> int:
+    """Pick an available random loopback port and pass it explicitly to Chrome.
+
+    Chrome reports navigator.webdriver=true for --headless and for
+    --remote-debugging-port=0. A non-zero OS-selected port with a normal window
+    avoids those two specific triggers (but does not guarantee bypassing checks).
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _use_headless_mode() -> bool:
+    """Use a normal browser window on desktop; allow opt-in headless operation."""
+    requested = os.environ.get("DOUYIN_CHROMIUM_HEADLESS", "").strip().lower()
+    if requested in {"1", "true", "yes", "on"}:
+        return True
+    if requested in {"0", "false", "no", "off"}:
+        return False
+    if os.name == "nt":
+        return False
+    return not bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 
 def _wait_for_page_socket(
@@ -200,15 +205,17 @@ def _stop_browser(process: subprocess.Popen[Any]) -> None:
 def fetch_visitor_cookie(*, timeout: float = 25.0) -> str:
     """Launch isolated headless Chromium and return the visitor Cookie header.
 
-    Port 0 asks Chromium to allocate an ephemeral debugging port. The temporary
-    user-data directory avoids accessing the user's normal browser profile.
+    The temporary profile isolates this visit from the user's normal browser.
+    A normal window is preferred when a desktop is available; headless is a
+    fallback for machines without a display.
     """
     binary = _find_chromium()
     with tempfile.TemporaryDirectory(prefix="douyin-chromium-") as temporary_profile:
         profile = Path(temporary_profile)
+        debug_port = _reserve_debug_port()
+        headless = _use_headless_mode()
         command = [
             binary,
-            "--headless=new",
             "--incognito",
             "--no-first-run",
             "--no-default-browser-check",
@@ -219,13 +226,15 @@ def fetch_visitor_cookie(*, timeout: float = 25.0) -> str:
             "--disable-gpu",
             "--disable-dev-shm-usage",
             "--remote-debugging-address=127.0.0.1",
-            "--remote-debugging-port=0",
+            f"--remote-debugging-port={debug_port}",
             "--remote-allow-origins=*",
             f"--user-data-dir={profile}",
         ]
+        if headless:
+            command.append("--headless=new")
         if os.name == "posix" and hasattr(os, "geteuid") and os.geteuid() == 0:
             command.append("--no-sandbox")
-        command.append(DOUYIN_HOME)
+        command.append("about:blank")
 
         popen_options: dict[str, Any] = {
             "stdin": subprocess.DEVNULL,
@@ -244,8 +253,9 @@ def fetch_visitor_cookie(*, timeout: float = 25.0) -> str:
 
         socket: websocket.WebSocket | None = None
         try:
-            port = _wait_for_debug_port(profile, process, min(timeout, 10.0))
-            page_socket_url = _wait_for_page_socket(port, process, min(timeout, 10.0))
+            page_socket_url = _wait_for_page_socket(
+                debug_port, process, min(timeout, 10.0)
+            )
             try:
                 socket = websocket.create_connection(
                     page_socket_url,
@@ -259,7 +269,9 @@ def fetch_visitor_cookie(*, timeout: float = 25.0) -> str:
             _cdp_command(socket, 2, "Page.enable")
             _cdp_command(socket, 3, "Page.navigate", {"url": DOUYIN_HOME})
 
-            deadline = time.monotonic() + timeout
+            # The guest cookies are set by scripts after the document is ready.
+            time.sleep(3.0)
+            deadline = time.monotonic() + max(1.0, timeout - 3.0)
             last_cookie_header = ""
             command_id = 4
             while time.monotonic() < deadline:
@@ -285,9 +297,13 @@ def fetch_visitor_cookie(*, timeout: float = 25.0) -> str:
                 discovered = ", ".join(names[:20]) or "无"
             else:
                 discovered = "无"
+            mode = "headless" if headless else "普通窗口"
             raise BrowserCookieError(
-                "Chromium 已访问抖音，但在等待期限内未取得 UIFID 访客 Cookie。"
-                f"发现的 Cookie 名称：{discovered}。这可能是网络限制或抖音风控导致。"
+                "Chromium 已访问抖音，但未取得 UIFID 访客 Cookie。"
+                f"浏览器模式：{mode}；发现的 Cookie 名称：{discovered}。"
+                "抖音可能没有向当前访客会话签发 UIFID，或仍在执行风控。"
+                "如果当前处于无桌面环境，建议在有图形桌面的本机运行后重试；"
+                "也可以使用 --cookie-file 提供已有的访客 Cookie。"
             )
         finally:
             if socket is not None:
