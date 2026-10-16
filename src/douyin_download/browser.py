@@ -15,7 +15,7 @@ from typing import Any
 import httpx
 import websocket
 
-from .signing.websign import UIFID_COOKIE_NAMES, pick_uifid
+from .signing.websign import pick_uifid
 
 DOUYIN_HOME = "https://www.douyin.com/"
 DEFAULT_COOKIE_FILENAME = "douyin_cookie"
@@ -171,23 +171,24 @@ def _header_from_cdp_cookies(cookies: list[dict[str, Any]]) -> str:
 
 
 def _stop_browser(process: subprocess.Popen[Any]) -> None:
-    if process.poll() is not None:
-        return
     if os.name == "posix":
+        # Kill the process group even if Chrome's main process exited first;
+        # renderer/utility subprocesses may still be alive.
         try:
             os.killpg(process.pid, signal.SIGTERM)
         except ProcessLookupError:
-            pass
+            return
         try:
             process.wait(timeout=3)
         except subprocess.TimeoutExpired:
             pass
-        # Also clean up any Chromium renderer processes still in this process group.
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
     else:
+        if process.poll() is not None:
+            return
         process.terminate()
         try:
             process.wait(timeout=3)
@@ -221,10 +222,10 @@ def fetch_visitor_cookie(*, timeout: float = 25.0) -> str:
             "--remote-debugging-port=0",
             "--remote-allow-origins=*",
             f"--user-data-dir={profile}",
-            DOUYIN_HOME,
         ]
         if os.name == "posix" and hasattr(os, "geteuid") and os.geteuid() == 0:
             command.append("--no-sandbox")
+        command.append(DOUYIN_HOME)
 
         popen_options: dict[str, Any] = {
             "stdin": subprocess.DEVNULL,
