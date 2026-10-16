@@ -33,7 +33,7 @@ class CookieRejectedError(DetailRequestError):
 
 def _uifid_rejected_message() -> str:
     return (
-        "抖音拒绝了详情请求（UIFID Not Found）。当前 Cookie 无效或未被抖音识别。"
+        "抖音拒绝了详情请求（UIFID Not Found）。当前 UIFID Cookie 无效或未被抖音识别。"
         "使用 CLI 默认的项目根目录 ./douyin_cookie 时，程序会自动重新获取访客 Cookie "
         "并重试一次；也可以通过 DOUYIN_COOKIE 环境变量或 --cookie-file 手动提供 Cookie。"
         "伪造 UIFID 无法解决此错误。"
