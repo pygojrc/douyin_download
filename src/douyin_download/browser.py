@@ -203,7 +203,7 @@ def _stop_browser(process: subprocess.Popen[Any]) -> None:
 
 
 def fetch_visitor_cookie(*, timeout: float = 25.0) -> str:
-    """Launch isolated headless Chromium and return the visitor Cookie header.
+    """Launch isolated Chromium and return the visitor Cookie header.
 
     The temporary profile isolates this visit from the user's normal browser.
     A normal window is preferred when a desktop is available; headless is a
