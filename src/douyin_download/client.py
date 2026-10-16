@@ -27,6 +27,19 @@ class DetailRequestError(RuntimeError):
     """Network request failed, was blocked, or returned an unexpected shape."""
 
 
+class CookieRejectedError(DetailRequestError):
+    """Douyin explicitly reported that the visitor UIFID cookie was not accepted."""
+
+
+def _uifid_rejected_message() -> str:
+    return (
+        "抖音拒绝了详情请求（UIFID Not Found）。当前 Cookie 无效或未被抖音识别。"
+        "使用 CLI 默认的项目根目录 ./douyin_cookie 时，程序会自动重新获取访客 Cookie "
+        "并重试一次；也可以通过 DOUYIN_COOKIE 环境变量或 --cookie-file 手动提供 Cookie。"
+        "伪造 UIFID 无法解决此错误。"
+    )
+
+
 def _parse_cookie(cookie_header: str | None) -> dict[str, str]:
     cookies: dict[str, str] = {}
     for pair in (cookie_header or "").split(";"):
@@ -156,27 +169,24 @@ def fetch_detail(value: str, *, cookie_header: str | None = None, timeout: float
         payload = response.json()
     except (json.JSONDecodeError, ValueError) as exc:
         response_text = response.text
-        if response.status_code == 403 and "uifid not found" in response_text.lower():
-            raise DetailRequestError(
-                "抖音拒绝了匿名详情请求（HTTP 403：UIFID Not Found）。"
-                "详情接口当前需要有效的访客 UIFID Cookie。请在浏览器打开抖音后，"
-                "将自己当前会话的 Cookie 通过 DOUYIN_COOKIE 环境变量或 --cookie-file "
-                "传入；程序不会持久化该 Cookie。伪造 UIFID 无法解决此错误。"
-            ) from exc
+        if "uifid not found" in response_text.lower():
+            raise CookieRejectedError(_uifid_rejected_message()) from exc
         snippet = response_text[:400].replace("\n", " ")
         raise DetailRequestError(
             f"抖音返回了非 JSON 内容（HTTP {response.status_code}）：{snippet}"
         ) from exc
 
+    payload_text = json.dumps(payload, ensure_ascii=False)
+    if "uifid not found" in payload_text.lower():
+        raise CookieRejectedError(_uifid_rejected_message())
     if response.status_code != 200:
         raise DetailRequestError(
-            f"抖音详情接口返回 HTTP {response.status_code}："
-            + json.dumps(payload, ensure_ascii=False)[:700]
+            f"抖音详情接口返回 HTTP {response.status_code}：" + payload_text[:700]
         )
     if isinstance(payload, dict) and isinstance(payload.get("aweme_detail"), dict):
         return payload["aweme_detail"]
 
     raise DetailRequestError(
         "抖音未返回 aweme_detail（可能是风控、Cookie/签名校验失败，或作品不可见）。"
-        + " 上游响应：" + json.dumps(payload, ensure_ascii=False)[:1000]
+        + " 上游响应：" + payload_text[:1000]
     )
