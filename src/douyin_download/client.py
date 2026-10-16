@@ -155,7 +155,15 @@ def fetch_detail(value: str, *, cookie_header: str | None = None, timeout: float
     try:
         payload = response.json()
     except (json.JSONDecodeError, ValueError) as exc:
-        snippet = response.text[:400].replace("\n", " ")
+        response_text = response.text
+        if response.status_code == 403 and "uifid not found" in response_text.lower():
+            raise DetailRequestError(
+                "抖音拒绝了匿名详情请求（HTTP 403：UIFID Not Found）。"
+                "详情接口当前需要有效的访客 UIFID Cookie。请在浏览器打开抖音后，"
+                "将自己当前会话的 Cookie 通过 DOUYIN_COOKIE 环境变量或 --cookie-file "
+                "传入；程序不会持久化该 Cookie。伪造 UIFID 无法解决此错误。"
+            ) from exc
+        snippet = response_text[:400].replace("\n", " ")
         raise DetailRequestError(
             f"抖音返回了非 JSON 内容（HTTP {response.status_code}）：{snippet}"
         ) from exc
