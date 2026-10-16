@@ -1,0 +1,57 @@
+name: tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package and test dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Compile package
+        run: python -m compileall -q src tests
+      - name: Run unit tests
+        run: python -m pytest -q
+
+  live-smoke:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[live-smoke]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install CLI
+        run: python -m pip install .
+      - name: Attempt one anonymous request for the sample work
+        shell: bash
+        run: |
+          set +e
+          douyin-download detail 'https://www.douyin.com/root/search/%E7%BE%8E%E5%B0%91%E5%A5%B3%E8%A7%86%E9%A2%91?aid=7e734c83-1c2f-4e12-91de-d71cabe7f0b3&modal_id=7349403611006389555&type=general' --no-auto-browser > detail.json 2> detail-error.log
+          result=$?
+          if [ "$result" -eq 0 ]; then
+            python - <<'PY'
+          import json
+          with open("detail.json", encoding="utf-8") as stream:
+              data = json.load(stream)
+          author = data.get("author") or {}
+          print("LIVE_REQUEST=success")
+          print("aweme_id:", data.get("aweme_id"))
+          print("author:", author.get("nickname"))
+          print("desc:", (data.get("desc") or "")[:160])
+          PY
+          else
+            echo "LIVE_REQUEST=failed"
+            echo "CLI exit code: $result"
+            cat detail-error.log
+          fi
